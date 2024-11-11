@@ -34,7 +34,7 @@ jobs:
         # Artifact name
         name: oneblock # optional, default is artifact
     # A file, directory or wildcard pattern that describes what to upload
-        path: target\*.jar
+        path: target/*.jar
     # The desired behavior if no files are found using the provided path.
 
         if-no-files-found: error
