@@ -7,7 +7,10 @@ import org.bukkit.util.Vector;
 
 import com.cryptomorin.xseries.XBlock;
 import com.cryptomorin.xseries.XMaterial;
+import com.nexomc.nexo.api.NexoItems;
 
+import Oneblock.Invitation.Guest;
+import Oneblock.Invitation.Invitation;
 import Oneblock.PlData.JsonSimple;
 import Oneblock.PlData.ReadOldData;
 import Oneblock.UniversalPlace.*;
@@ -30,7 +33,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
-
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
@@ -38,6 +40,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
@@ -62,33 +65,30 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.generator.ChunkGenerator;
 
 public class Oneblock extends JavaPlugin {
-    static final Random rnd = new Random(System.currentTimeMillis());
+    public static Oneblock plugin;
+	
+    final Random rnd = new Random(System.currentTimeMillis());
     boolean on = false;
-    static int x = 0;
-    static int y = 0;
-    static int z = 0;
-    FileConfiguration config, newConfigz;
-    static World wor;
-    World leavewor;
-    int random = 0;
+    int x = 0, y = 0, z = 0;
+    FileConfiguration config, config_temp;
+    World wor, leavewor;
     boolean superlegacy, legacy;
     ArrayList <Object> blocks = new ArrayList <>();
     ArrayList <EntityType> mobs = new ArrayList <>();
     ArrayList <XMaterial> flowers = new ArrayList <>();
-    static List <Player> plonl;
+    PlayerCache cache = new PlayerCache();
     String TextP = "";
     int sto = 100;
     BarColor Progress_color;
     boolean il3x3 = false, rebirth = false, autojoin = false;
     boolean droptossup = true, physics = false;
-    boolean lvl_bar_mode = false, chat_alert = false;
+    boolean lvl_bar_mode = false, chat_alert = false, particle = true;
     boolean protection = false;
     boolean PAPI = false;
     boolean WorldGuard = OBWorldGuard.canUse;
-    boolean ItemsAdder = false;
-    boolean Oraxen = false;
+    Place.Type placetype = Place.Type.basic;
     boolean Border = true;
-    boolean Progress_bar = true;
+    public boolean Progress_bar = true;
     boolean СircleMode = false;
     boolean UseEmptyIslands = true;
     boolean saveplayerinventory = false;
@@ -98,7 +98,7 @@ public class Oneblock extends JavaPlugin {
     final VoidChunkGenerator GenVoid = new VoidChunkGenerator();
     Place placer;
     
-    public static World wor() { return wor; }
+    public static World wor() { return Oneblock.plugin.wor; }
     
 	@Override
 	public ChunkGenerator getDefaultWorldGenerator(String worldName, String id) {return GenVoid;}
@@ -112,6 +112,7 @@ public class Oneblock extends JavaPlugin {
     
     @Override
     public void onEnable() {
+    	plugin = this;
         superlegacy = !XMaterial.supports(9);// Is version 1.9 supported?
         legacy = !XMaterial.supports(13);// Is version 1.13 supported?
         Border = findMethod(Bukkit.class, "createWorldBorder");// Is virtual border supported?
@@ -126,9 +127,11 @@ public class Oneblock extends JavaPlugin {
         	getLogger().info("PlaceholderAPI has been found!");
             new OBP().register();
         }
-        ItemsAdder = pluginManager.isPluginEnabled("ItemsAdder");
-        Oraxen = pluginManager.isPluginEnabled("Oraxen");
-        placer = legacy ? new Place1_8to1_12() : Oraxen ? new PlaceOraxen() : ItemsAdder ? new PlaceItemsAdder() : new Place1_13plus();
+        if (pluginManager.isPluginEnabled("ItemsAdder")) placetype = Place.Type.ItemsAdder;
+        if (pluginManager.isPluginEnabled("Oraxen")) placetype = Place.Type.Oraxen;
+        if (pluginManager.isPluginEnabled("Nexo")) placetype = Place.Type.Nexo;
+        if (legacy) placetype = Place.Type.legacy;
+        placer = Place.GetPlacerByType(placetype);
         Configfile();
         Datafile();
         Chestfile();
@@ -151,6 +154,7 @@ public class Oneblock extends JavaPlugin {
         else 
             runMainTask();
     }
+    
     public class RespawnJoinEvent implements Listener {
         @EventHandler
         public void Respawn(final PlayerRespawnEvent e) {
@@ -260,7 +264,7 @@ public class Oneblock extends JavaPlugin {
             if ((z - loc.getBlockZ()) % sto != 0) return;
 
             Entity drop = e.getEntity();
-            drop.teleport(loc.add(0, .75, 0));
+            drop.teleport(loc.add(0, .8, 0));
             drop.setVelocity(new Vector(0, .1, 0));
         }
     	@EventHandler
@@ -280,6 +284,7 @@ public class Oneblock extends JavaPlugin {
             Bukkit.getScheduler().runTaskLater(Oneblock.this, () -> { BlockGen(result[0], result[1], plID, ponl, block); }, 1L);
     	}
     }
+    
     public class wor_null implements Runnable {
         public void run() {
             if (wor == null) {
@@ -293,11 +298,13 @@ public class Oneblock extends JavaPlugin {
             }
         }
     }
+    
     public void runMainTask() {
     	Bukkit.getScheduler().cancelTasks(this);
 		if (config.getDouble("y") == 0) return;
-		Bukkit.getScheduler().runTaskTimerAsynchronously(this, new TaskUpdatePlayers(), 0, 110);
+		Bukkit.getScheduler().runTaskTimerAsynchronously(this, new TaskUpdatePlayers(), 0, 120);
 		Bukkit.getScheduler().runTaskTimerAsynchronously(this, new TaskSaveData(), 200, 6000);
+		Bukkit.getScheduler().runTaskTimerAsynchronously(this, new TaskParticle(), 40, 40);
 		Bukkit.getScheduler().runTaskTimer(this, new Task(), 40, 80);
 		on = true;
 		
@@ -310,81 +317,62 @@ public class Oneblock extends JavaPlugin {
         else WorldGuard = false;
     }
 
-    public void addinvite(UUID name, UUID to) {
-    	for(Invitation item: Invitation.list) 
-			if (item.equals(name, to))
-				return;
-    	Invitation inv_ = new Invitation(name, to);
-    	Invitation.list.add(inv_);
-    	Bukkit.getScheduler().runTaskLaterAsynchronously(this, 
-    			() -> { Invitation.list.remove(inv_); }, 300L);
-    }
-    public boolean checkinvite(Player pl) {
-		UUID uuid = pl.getUniqueId();
-		Invitation inv_ = Invitation.check(uuid);
-		if (inv_ == null) return false; 
-		if (!PlayerInfo.ExistId(inv_.Inviting)) return false;
-			
-		if (PlayerInfo.ExistId(uuid)) {
-			if (Progress_bar)
-				PlayerInfo.get(uuid).bar.removePlayer(pl);
-			pl.performCommand("ob idreset /n");
-		}
-		PlayerInfo.get(inv_.Inviting).uuids.add(uuid);
-		pl.performCommand("ob j"); 
-		Invitation.list.remove(inv_);
-		return true; 
-    }
-    
-    public PlayerInfo checkguest(UUID uuid) {
-    	Guest g = Guest.check(uuid);
-		if (g == null) return null;
-		if (!PlayerInfo.ExistId(g.Inviting)) return null;
-		return PlayerInfo.get(g.Inviting);
-    }
-
 	public int[] getFullCoord(final int id) {
 		if (!СircleMode)
-			return new int[] {id * sto + Oneblock.x, Oneblock.z};
-		int x = 0, z = 0;
+			return new int[] {id * sto + x, z, id};
+		int X = 0, Z = 0;
 		for (int i = 0; i < id; i++) {
-			if (x > z)
-			    if (x > -z)
-				    z--;
+			if (X > Z)
+			    if (X > -Z)
+				    Z--;
 				else
-				    x--;
-			else if (-x > z || x == z && z < 0)
-				z++;
+				    X--;
+			else if (-X > Z || X == Z && Z < 0)
+				Z++;
 			else
-				x++;
+				X++;
 		}
-		x = x * sto + Oneblock.x;
-		z = z * sto + Oneblock.z;
-		return new int[] {x, z};
+		X = X * sto + x;
+		Z = Z * sto + z;
+		return new int[] {X, Z, id};
 	}
 	
 	public class TaskUpdatePlayers implements Runnable {
-		public void run() { plonl = wor.getPlayers(); }
+		public void run() { cache.updateCache(wor.getPlayers()); }
 	}
 	
 	public class TaskSaveData implements Runnable {
-		public void run() { saveData(); }
+		public void run() { SaveData(); }
+	}
+	
+	public class TaskParticle implements Runnable {
+		public void run() { // BlockParticle
+			if (superlegacy) return;
+			if (!particle) return;
+	        
+        	for (Player ponl: cache.getPlayers()) {
+        		final int result[] = cache.getFullCoord(ponl);
+        		final int X_pl = result[0], Z_pl = result[1];
+                
+        		wor.spawnParticle(Particle.PORTAL, new Location(wor, X_pl, y+.5, Z_pl), 5, 0, 0, 0, 0);
+        		wor.spawnParticle(Particle.PORTAL, new Location(wor, X_pl+1, y+.5, Z_pl), 5, 0, 0, 0, 0);
+        		wor.spawnParticle(Particle.PORTAL, new Location(wor, X_pl, y+.5, Z_pl+1), 5, 0, 0, 0, 0);
+        		wor.spawnParticle(Particle.PORTAL, new Location(wor, X_pl+1, y+.5, Z_pl+1), 5, 0, 0, 0, 0);
+        	}
+        }
 	}
 
     public class Task implements Runnable {
-        public void run() {
-            for (Player ponl: plonl) {
+        public void run() { // SubBlockGen
+            for (Player ponl: cache.getPlayers()) {
             	final UUID uuid = ponl.getUniqueId();
-            	if (!PlayerInfo.ExistId(uuid))
-            		continue;
-            	final int plID = PlayerInfo.GetId(uuid);
-            	final int result[] = getFullCoord(plID);
-                final int X_pl = result[0], Z_pl = result[1];
+            	final int result[] = cache.getFullCoord(ponl);
+                final int X_pl = result[0], Z_pl = result[1], plID = result[2];
             	
                 if (protection && !ponl.hasPermission("Oneblock.ignoreBarrier")) {
                 	boolean CheckGuest = false;
                 	Location loc = ponl.getLocation();
-            		PlayerInfo inf = checkguest(ponl.getUniqueId());
+            		PlayerInfo inf = Guest.getPlayerInfo(ponl.getUniqueId());
             		if (inf != null) {
                     	int crd[] = getFullCoord(PlayerInfo.GetId(inf.uuid));
                         CheckGuest = CheckPosition(loc, crd[0], crd[1]);
@@ -398,7 +386,7 @@ public class Oneblock extends JavaPlugin {
                 }
                 
                 final Block block = wor.getBlockAt(X_pl, y, Z_pl);
-                if (block.getType().equals(Material.AIR)) 
+                if (block.getType().equals(Material.AIR) && PlayerInfo.ExistId(uuid)) 
                 	BlockGen(X_pl, Z_pl, plID, ponl, block);
             }
         }
@@ -416,7 +404,8 @@ public class Oneblock extends JavaPlugin {
     	Level lvl_inf = Level.get(inf.lvl); 
         if (++inf.breaks >= inf.getNeed()) {
         	inf.lvlup();
-        	lvl_inf = Level.get(inf.lvl); 
+        	lvl_inf = Level.get(inf.lvl);
+        	//lvl_inf.giveLevelRewards(ponl.getName());
             if (Progress_bar) {
             	inf.bar.setColor(lvl_inf.color);
             	if (lvl_bar_mode)
@@ -431,7 +420,7 @@ public class Oneblock extends JavaPlugin {
             inf.bar.setProgress(inf.getPercent());
             inf.bar.addPlayer(ponl);
         }
-        random = lvl_inf.blocks;
+        int random = lvl_inf.blocks;
         if (random != 0) random = rnd.nextInt(random);
         if (blocks.get(random) == null) {
             XBlock.setType(block, GRASS_BLOCK);
@@ -456,7 +445,7 @@ public class Oneblock extends JavaPlugin {
         }
 	}
 
-    public void onDisable() { saveData(); }
+    public void onDisable() { SaveData(); }
     
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
     	if (!cmd.getName().equalsIgnoreCase("oneblock")) return false;
@@ -490,6 +479,7 @@ public class Oneblock extends JavaPlugin {
 	            	X_pl = result[0]; Z_pl = result[1];
 	            	if (plID != PlayerInfo.size())
 	            		Island.clear(wor, X_pl, y, Z_pl, sto/4);
+	            	XBlock.setType(wor.getBlockAt(X_pl, y, Z_pl), XMaterial.GRASS_BLOCK);
 	                if (il3x3)
 	                	Island.place(wor, X_pl, y, Z_pl);
 	                if (WorldGuard) {
@@ -540,10 +530,10 @@ public class Oneblock extends JavaPlugin {
 	            }
 	        	Player pl = (Player) sender;
 	            if (args.length < 2) {
-	        		GUI.visitGUI(pl, plonl);
+	        		GUI.visitGUI(pl, Bukkit.getOfflinePlayers());
 	        		return true;
 	        	}
-	            Player inv = Bukkit.getPlayer(args[1]);
+	            OfflinePlayer inv = Bukkit.getOfflinePlayer(args[1]);
 	        	if (inv == null) return true;
 	    		if (inv == pl) {
 	    			pl.performCommand("ob j");
@@ -607,7 +597,7 @@ public class Oneblock extends JavaPlugin {
 	        			return true;
 	    			}
 	    		}
-	    		addinvite(uuid, inv.getUniqueId());
+	    		Invitation.add(uuid, inv.getUniqueId());
 	    		String name = pl.getName();
 	    		GUI.acceptGUI(inv, name);
 	    		inv.sendMessage(String.format(Messages.invited, name));
@@ -648,7 +638,7 @@ public class Oneblock extends JavaPlugin {
 	        }
 	        case ("accept"):{
 	        	Player pl = (Player) sender;
-	       	 	if (checkinvite(pl))
+	       	 	if (Invitation.check(pl))
 	       	 		sender.sendMessage(Messages.accept_succes);
 	       	 	else
 	       	 		sender.sendMessage(Messages.accept_none);
@@ -698,7 +688,7 @@ public class Oneblock extends JavaPlugin {
 	            }
 	            else sender.sendMessage(Messages.bool_format);
 	        	if (!GUI.enabled)
-	        		for (Player pl : plonl)
+	        		for (Player pl : wor.getPlayers())
 	        			pl.closeInventory();
 	            sender.sendMessage(String.format("%s%s is now %s", ChatColor.GREEN, parametr, (GUI.enabled?"enabled.":"disabled.")));
 	        	return true;
@@ -794,10 +784,10 @@ public class Oneblock extends JavaPlugin {
 			            			Border = Boolean.valueOf(args[1]);
 			                    	config.set("Border", Border);
 			                    	if (Border) {
-			                    		for (Player pl: plonl) 
+			                    		for (Player pl: wor.getPlayers()) 
 			                    			UpdateBorderLocation(pl, pl.getLocation());
 			                    	}
-			                    	else for (Player pl: plonl) 
+			                    	else for (Player pl: wor.getPlayers()) 
 			                    			pl.setWorldBorder(null);
 			                }
 			                else sender.sendMessage(Messages.bool_format);
@@ -811,6 +801,7 @@ public class Oneblock extends JavaPlugin {
 			            case ("droptossup"):
 			            case ("physics"):
 			            case ("autojoin"):
+			            case ("particle"):
 			            case ("saveplayerinventory"):{
 			            	if (args.length > 1 &&
 			                    	(args[1].equals("true") || args[1].equals("false"))) {
@@ -962,13 +953,12 @@ public class Oneblock extends JavaPlugin {
 			                        for (PlayerInfo inf:PlayerInfo.list)
 			                        	inf.bar.setTitle(Level.get(inf.lvl).name);
 			                        config.set("Progress_bar_text", "level");
-			                        return true;
 			                    } else {
 			                        for (PlayerInfo inf:PlayerInfo.list)
 			                        	inf.bar.setTitle("Progress bar");
 			                        config.set("Progress_bar_text", "Progress bar");
-			                        return true;
 			                    }
+			                    return true;
 			                }
 			                if (args[1].equalsIgnoreCase("settext")) {
 			                	if (!Progress_bar)
@@ -977,7 +967,7 @@ public class Oneblock extends JavaPlugin {
 								for (int i = 2; i < args.length; i++)
 									txt_bar = i == 2 ? args[i] : String.format("%s %s", txt_bar, args[i]);
 			                    lvl_bar_mode = false;
-			                    if (PAPI) for (Player ponl : plonl)
+			                    if (PAPI) for (Player ponl : wor.getPlayers())
 			                    	PlayerInfo.get(ponl.getUniqueId()).bar.setTitle(PlaceholderAPI.setPlaceholders(ponl, txt_bar));
 			                    else 
 			                    	for (PlayerInfo bb : PlayerInfo.list) bb.bar.setTitle(txt_bar);
@@ -1012,7 +1002,7 @@ public class Oneblock extends JavaPlugin {
 			                    		sender.sendMessage(((Material)blocks.get(i)).name());
 			                    	else if (blocks.get(i).getClass() == XMaterial.class)
 			                    		sender.sendMessage(((XMaterial)blocks.get(i)).name());
-			                    	else if (ItemsAdder && blocks.get(i).getClass() == CustomBlock.class)
+			                    	else if (Place.Type.ItemsAdder == placetype && blocks.get(i).getClass() == CustomBlock.class)
 			                    		sender.sendMessage(((CustomBlock)blocks.get(i)).getId());
 			                    	else
 			                    		sender.sendMessage((String)blocks.get(i));
@@ -1110,7 +1100,7 @@ public class Oneblock extends JavaPlugin {
     		        	"  ▄▄    ▄▄",
     		        	"█    █  █▄▀",
     		        	"▀▄▄▀ █▄▀",
-    		        	"Create by MrMarL\nPlugin version: v1.2.6",
+    		        	"Create by MrMarL\nPlugin version: v1.2.7",
     		        	"Server version: ", superlegacy?"super legacy":(legacy?"legacy":""), XMaterial.getVersion()));
     		        return true;
 		    }
@@ -1144,26 +1134,23 @@ public class Oneblock extends JavaPlugin {
         }
     }
 
-    public void saveData() {
-        try {
-        	File PlData = new File(getDataFolder(), "PlData.json");
-    		JsonSimple.Write(PlayerInfo.list, PlData);
-        } 
-        catch (Exception e) { e.printStackTrace(); }
+    public void SaveData() {
+    	File PlData = new File(getDataFolder(), "PlData.json");
+    	JsonSimple.Write(PlayerInfo.list, PlData);
     }
 
-    private void Blockfile() {
+	private void Blockfile() {
     	blocks.clear();
     	mobs.clear();
     	Level.levels.clear();
         File block = new File(getDataFolder(), "blocks.yml");
         if (!block.exists())
             saveResource("blocks.yml", false);
-        newConfigz = YamlConfiguration.loadConfiguration(block);
-        if (newConfigz.isString("MaxLevel"))
-        	Level.max.name = newConfigz.getString("MaxLevel");
-        for (int i = 0; newConfigz.isList(String.format("%d", i)); i++) {
-        	List <String> bl_temp = newConfigz.getStringList(String.format("%d", i));
+        config_temp = YamlConfiguration.loadConfiguration(block);
+        if (config_temp.isString("MaxLevel"))
+        	Level.max.name = config_temp.getString("MaxLevel");
+        for (int i = 0; config_temp.isList(String.format("%d", i)); i++) {
+        	List <String> bl_temp = config_temp.getStringList(String.format("%d", i));
         	Level level = new Level(bl_temp.get(0));
         	Level.levels.add(level);
         	int q = 1;
@@ -1214,15 +1201,22 @@ public class Oneblock extends JavaPlugin {
         			if (a != null && a.equals(Material.GRASS_BLOCK))
         				a = null;
         			if (a == null) {
-	        			if (Oraxen) {
-	        				if (OraxenItems.exists(text))
-	        					a = text;
-	        			}
-	        			else if (ItemsAdder) {
-	        				CustomBlock customBlock = CustomBlock.getInstance(text);
+        				switch (placetype) {
+						case ItemsAdder:
+							CustomBlock customBlock = CustomBlock.getInstance(text);
 	        				if(customBlock != null) 
 	        					a = customBlock;
-	        			}
+							break;
+						case Oraxen:
+							if (OraxenItems.exists(text))
+	        					a = text;
+							break;
+						case Nexo:
+							if (NexoItems.exists(text))
+	        					a = text;
+							break;
+						default: break;
+        				}
         			}
         			blocks.add(a);
         		}
@@ -1247,7 +1241,7 @@ public class Oneblock extends JavaPlugin {
         File message = new File(getDataFolder(), "messages.yml");
         if (!message.exists())
             saveResource("messages.yml", false);
-        newConfigz = YamlConfiguration.loadConfiguration(message);
+        config_temp = YamlConfiguration.loadConfiguration(message);
         
         Messages.noperm = MessageCheck("noperm", Messages.noperm);
         Messages.noperm_inv = MessageCheck("noperm_inv", Messages.noperm_inv);
@@ -1270,7 +1264,7 @@ public class Oneblock extends JavaPlugin {
         File gui = new File(getDataFolder(), "gui.yml");
         if (!gui.exists())
             saveResource("gui.yml", false);
-        newConfigz = YamlConfiguration.loadConfiguration(gui);
+        config_temp = YamlConfiguration.loadConfiguration(gui);
         
         Messages.baseGUI = MessageCheck("baseGUI", Messages.baseGUI);
         Messages.acceptGUI = MessageCheck("acceptGUI", Messages.acceptGUI);
@@ -1281,8 +1275,8 @@ public class Oneblock extends JavaPlugin {
         Messages.idresetGUI = MessageCheck("idresetGUI", Messages.idresetGUI);
     }
     private String MessageCheck(String name, String def_message) {
-    	if (newConfigz.isString(name))
-        	return ChatColor.translateAlternateColorCodes('&',newConfigz.getString(name));
+    	if (config_temp.isString(name))
+        	return ChatColor.translateAlternateColorCodes('&',config_temp.getString(name));
     	return def_message;
     }
     private void Flowerfile() {
@@ -1290,9 +1284,9 @@ public class Oneblock extends JavaPlugin {
         File flower = new File(getDataFolder(), "flowers.yml");
         if (!flower.exists())
             saveResource("flowers.yml", false);
-        newConfigz = YamlConfiguration.loadConfiguration(flower);
+        config_temp = YamlConfiguration.loadConfiguration(flower);
         flowers.add(GRASS);
-        for(String list:newConfigz.getStringList("flowers"))
+        for(String list:config_temp.getStringList("flowers"))
         	if (!XMaterial.matchXMaterial(list).isPresent())
         		flowers.add(GRASS);
         	else
@@ -1377,6 +1371,7 @@ public class Oneblock extends JavaPlugin {
         autojoin = Check("autojoin", autojoin);
         droptossup = Check("droptossup", droptossup);
         physics = Check("physics", physics);
+        particle = Check("particle", particle);
     }
     
     public static int getlvl(UUID pl_uuid) {
@@ -1423,11 +1418,11 @@ public class Oneblock extends JavaPlugin {
         	if (sender.hasPermission("Oneblock.visit")) commands.addAll(Arrays.asList("visit","allow_visit"));
             if (sender.hasPermission("Oneblock.set")) {
             	commands.addAll(Arrays.asList("set","setleave","Progress_bar","chat_alert","setlevel","clear","circlemode","lvl_mult","max_players_team", "chest", "saveplayerinventory",
-            		"reload","islands","island_rebirth","protection","worldguard","border","listlvl","autoJoin","droptossup","physics","UseEmptyIslands"));
+            		"reload","islands","island_rebirth","protection","worldguard","border","listlvl","autoJoin","droptossup","physics","particle","UseEmptyIslands"));
             }
         } else if (args.length == 2) {
         	if (args[0].equals("invite") || args[0].equals("kick") || args[0].equals("visit")) {
-        		for (Player ponl: plonl)
+        		for (Player ponl: cache.getPlayers())
         			commands.add(ponl.getName());
         	}
         	else if (sender.hasPermission("Oneblock.set")) {
@@ -1438,7 +1433,7 @@ public class Oneblock extends JavaPlugin {
         				commands.add(t);
                 case ("clear"):
                 case ("setlevel"):{
-            		for (Player ponl: plonl)
+            		for (Player ponl: cache.getPlayers())
             			commands.add(ponl.getName());
             		break;
             	}
